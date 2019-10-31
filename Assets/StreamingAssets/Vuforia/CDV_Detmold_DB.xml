@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<QCARConfig xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="qcar_config.xsd">
+  <Tracking>
+    <ImageTarget name="Seite_Reduziert" size="0.297000 0.162339" />
+    <ImageTarget name="Front_Reduziert" size="0.210000 0.231630" />
+    <ImageTarget name="4-G" size="0.100000 0.110236" />
+    <ImageTarget name="4-F" size="0.100000 0.110236" />
+    <ImageTarget name="4-E" size="0.100000 0.110236" />
+    <ImageTarget name="4-D" size="0.100000 0.110236" />
+    <ImageTarget name="4-C" size="0.100000 0.110236" />
+    <ImageTarget name="4-B" size="0.100000 0.110236" />
+    <ImageTarget name="3-F" size="0.100000 0.110236" />
+    <ImageTarget name="3-E" size="0.100000 0.110236" />
+    <ImageTarget name="3-D" size="0.100000 0.110236" />
+    <ImageTarget name="3-C" size="0.100000 0.110236" />
+    <ImageTarget name="3-B" size="0.100000 0.110236" />
+    <ImageTarget name="2-F" size="0.100000 0.110236" />
+    <ImageTarget name="2-E" size="0.100000 0.110236" />
+    <ImageTarget name="2-D" size="0.100000 0.110236" />
+    <ImageTarget name="2-C" size="0.100000 0.110236" />
+    <ImageTarget name="1-E" size="0.100000 0.110551" />
+    <ImageTarget name="1-D" size="0.100000 0.110551" />
+  </Tracking>
+</QCARConfig>
