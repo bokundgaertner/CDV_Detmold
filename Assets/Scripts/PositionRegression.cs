@@ -4,143 +4,153 @@ using UnityEngine;
 using Vuforia;
 using UnityEngine.UI;
 
+
+/// <summary>
+/// Klasse die das Objekt-Tracking (Marker) und das Positionieren der 3D-Modelle handhabt
+/// </summary>
 public class PositionRegression : MonoBehaviour
 {
     [SerializeField]
-    private Transform frontTransfrom;
-    [SerializeField]
-    private Transform sideTransform;
-    [SerializeField]
-    private Transform backTransform;
+    private Transform building; // Referenz zur Position des 3D-Modells
+    private building savedBuildings; // Referenz zur Klasse der gespeicherten Modelle
 
-    public Vector3 offSet;
-    [SerializeField]
-    private Transform building;
+    private List<ImageTargetBehaviour> targets; // Referenzliste zu allen bild-Markern
 
-    private ImageTargetBehaviour frontImage;
-    private ImageTargetBehaviour sideImage;
-    private ImageTargetBehaviour backImage;
+    private Tracker trackerDevice; // Referenz zur Instanz des Vuforia Tracking Moduls
+
+    private float timeTillLastTrack = 0f; // Counter der verstrichenen Zeit zum letzten erfolgreichen Erfassens eines Markers
 
     [SerializeField]
-    private Vector3 relPosToFront;
-    [SerializeField]
-    private Vector3 relRotToFront;
-    [SerializeField]
-    private Vector3 relPosToSide;
-    [SerializeField]
-    private Vector3 relRotToSide;
+    private const float maximumDelay = 15f; // Maximaler Dauer der extrapolation der Position eines Markers
 
-    private LocationService location;
-    private CameraDevice myDevice;
-    //Debug:
-    public Text fpsText;
-
-    public Text posText;
-
-    public Button camOnOff;
-    private bool camState = true;
-    private Vector2 myPosition = new Vector2();
+    // Start is called before the first frame update
     void Start()
     {
-        myDevice = CameraDevice.Instance;
-        SwitchCamState();
-        
-        int targetFps = VuforiaRenderer.Instance.GetRecommendedFps(VuforiaRenderer.FpsHint.POWEREFFICIENCY);
-        Application.targetFrameRate = 15;
-        if (frontTransfrom != null)
-            if(frontTransfrom.GetComponent<ImageTargetBehaviour>() != null)
-                frontImage = frontTransfrom.GetComponent<ImageTargetBehaviour>();
-        if (sideTransform != null)
-            if (sideTransform.GetComponent<ImageTargetBehaviour>() != null)
-                sideImage = sideTransform.GetComponent<ImageTargetBehaviour>();
-        if (backTransform != null)
-            if (backTransform.GetComponent<ImageTargetBehaviour>() != null)
-                backImage = backTransform.GetComponent<ImageTargetBehaviour>();
+        // starten des Vuforia Tracking Moduls
+        trackerDevice = TrackerManager.Instance.InitTracker<PositionalDeviceTracker>();
+
+        // Referenzbildung der Marker
+        savedBuildings = FindObjectOfType<building>();
+        targets = savedBuildings.GetAllTargets();
+
+        // 3D-Modelle deaktieren
         building.gameObject.SetActive(false);
-        location = new LocationService();
-        location.Start();
-        camOnOff.onClick.AddListener(() => { SwitchCamState(); });
-        StartCoroutine(UpdateMap());
     }
 
-    private IEnumerator UpdateMap()
-    {
-        while(true)
-        {
-            yield return new WaitForSecondsRealtime(5f);
-            OSMWeb osm = FindObjectOfType<OSMWeb>();
-            if (osm != null)
-                osm.SetPosition(myPosition);
-        }
 
-    }
-    private void SwitchCamState()
-    {
-        if(camState)
-        {
-            myDevice.Stop();
-            camOnOff.transform.GetChild(0).GetComponent<Text>().text = "off";
-            camState = false;
-        }
-        else
-        {
-            myDevice.Start();
-            camOnOff.transform.GetChild(0).GetComponent<Text>().text = "on";
-            camState = true;
-        }
-    }
-    private IEnumerator StartCameraDelayed(float t)
-    {
-        yield return new WaitForSeconds(t);
-        SwitchCamState();
-    }
 
-    // Update is called once per frame
+    /// <summary>
+    /// Erfassen und Verfolgen der Marker, sowie anpassen der Position und Rotation der 3D-Modelle
+    /// </summary>
     void LateUpdate()
     {
-        fpsText.text = (1f/Time.deltaTime) + "FPS";
-        myPosition = new Vector2(location.lastData.latitude, location.lastData.longitude);
-        posText.text = myPosition.x + " : " + myPosition.y;
-        if ((frontImage.CurrentStatus == TrackableBehaviour.Status.TRACKED) && (sideImage.CurrentStatus == TrackableBehaviour.Status.TRACKED))
+        // resetten der Tracking Qualität
+        float trackingQuality = 0f;
+
+        // resetten der derzeit erfassten Marker und ihrer Tracking-Stati
+        List<ImageTargetBehaviour> trackedObjects = new List<ImageTargetBehaviour>();
+        List<TrackableBehaviour.Status> statList = new List<TrackableBehaviour.Status>();
+
+
+        // Liste der erfassten Marker durchgehen
+        for (int i = 0; i < targets.Count; i++)
         {
-            Vector3 targetPositionFront = (frontTransfrom.position + ((frontTransfrom.rotation * relPosToFront) * frontTransfrom.localScale.x));
-            Vector3 targetPositionSide = (sideTransform.position + ((sideTransform.rotation * relPosToSide) * sideTransform.localScale.x));
-            Vector3 averagePosition = (targetPositionFront + targetPositionSide) / 2f;
-            building.transform.position = averagePosition;
-            Quaternion averageQuat = Quaternion.Lerp((sideTransform.rotation * Quaternion.Euler(relRotToSide)), (frontTransfrom.rotation * Quaternion.Euler(relRotToFront)), 0.5f);
-            building.transform.rotation = averageQuat;
-            /*
-            Debug.DrawLine(frontTransfrom.position, targetPositionFront, Color.white);
-            Debug.DrawLine(sideTransform.position, targetPositionSide, Color.white);
-            Debug.DrawLine(averagePosition, targetPositionSide, Color.green);
-            Debug.DrawLine(averagePosition, targetPositionFront, Color.red);
-            */
-            if (!building.gameObject.activeSelf)
-                building.gameObject.SetActive(true);
+            // Falls die Referenz verloren geht, soll diese übersprungen werden
+            if (targets[i] == null)
+                continue;
+            // Setzen des Marker Status
+            TrackableBehaviour.Status targetStatus = targets[i].CurrentStatus;
+
+            // Falls der Marker erfasst oder extrapoliert wird ...
+            if (targetStatus == TrackableBehaviour.Status.TRACKED || targetStatus == TrackableBehaviour.Status.EXTENDED_TRACKED)
+            {
+                // Marker wird der derzeitigen Liste erfasster Marker hinzugefügt und auch deren Status gespeichert
+                trackedObjects.Add(targets[i]);
+                statList.Add(targetStatus);
+
+                // Wenn die Position des Markers erfasst (und nicht extrapoliert) wurde, wird die Qualitäts-Counter hochgesetzt
+                if (targetStatus == TrackableBehaviour.Status.TRACKED)
+                {
+                    trackingQuality += 0.2f;
+
+                    // Sonderregel für die Erfassung der vollen Fassade, da diese als besonders guter Marker gewertet wird
+                    if (targets[i].gameObject.name.Contains("full"))
+                    {
+                        trackingQuality += 0.2f;
+                    }
+
+                }
+                // bei der Extrapolation wird die Qualität heruntergestuft
+                else
+                    trackingQuality -= 0.1f;
+            }
+
         }
-        else if(frontImage.CurrentStatus == TrackableBehaviour.Status.TRACKED)
+
+        // Setzen des UI Symbols für die Tracking-Qualität
+        FindObjectOfType<UIHandler>().SetTrackingQualityIcon(trackingQuality);
+
+        // Flag ob mindestens ein Objekt erfasst wurde, oder ob nur extrapoliert wird
+        bool isTracking = statList.Contains(TrackableBehaviour.Status.TRACKED);
+
+
+        if (trackedObjects.Count == 0 && !trackerDevice.IsActive)
         {
-            Vector3 targetPositionFront = (frontTransfrom.position + ((frontTransfrom.rotation * relPosToFront) * frontTransfrom.localScale.x));
-            Debug.DrawLine(frontTransfrom.position, targetPositionFront, Color.green);
-            building.transform.position = targetPositionFront;
-            building.transform.rotation = frontTransfrom.rotation * Quaternion.Euler(relRotToFront);
-            if (!building.gameObject.activeSelf)
-                building.gameObject.SetActive(true);
+            trackerDevice.Start();
+            timeTillLastTrack += Time.deltaTime;
+            building.gameObject.SetActive(false);
+            return;
         }
-        else if(sideImage.CurrentStatus == TrackableBehaviour.Status.TRACKED)
+        // Falls kein Objekt getrackt wird, werden die 3D-Modelle deaktiviert, der Zeitcounter hochgesetzt und die Methode verlassen
+        else if (trackedObjects.Count == 0)
         {
-            Vector3 targetPositionSide = (sideTransform.position + ((sideTransform.rotation * relPosToSide) * sideTransform.localScale.x));
-            Debug.DrawLine(sideTransform.position, targetPositionSide, Color.green);
-            building.transform.position = targetPositionSide;
-            building.transform.rotation = sideTransform.rotation * Quaternion.Euler(relRotToSide);
-            if (!building.gameObject.activeSelf)
-                building.gameObject.SetActive(true);
+            timeTillLastTrack += Time.deltaTime;
+            building.gameObject.SetActive(false);
+            return;
         }
+        // Falls nur extrapoliert wird, wird der Zeitcounter hochgesetzt und nach einem "maximumDelay" die Trackerinstanz resettet
+        else if(!isTracking)
+        {
+            timeTillLastTrack += Time.deltaTime;
+            if (timeTillLastTrack >= maximumDelay)
+            {
+                trackerDevice.Stop();
+                building.gameObject.SetActive(false);
+                return;
+            }
+        }
+        // Wenn etwas gefunden wurde, soll das UI kurz aufleuchten (highlighting) und das 3D Modell aktiviert werden
         else
         {
-            if (building.gameObject.activeSelf)
-                building.gameObject.SetActive(false);
+            if (timeTillLastTrack > 0f)
+                FindObjectOfType<UIHandler>().FoundTrackerHighlighting();
+            timeTillLastTrack = 0f;
+            building.gameObject.SetActive(true);
         }
+
+        // resetten der Referenz der relativen Position und Rotation des 3D-Modells
+        Vector3 renderPosition = new Vector3(0f, 0f, 0f);
+        Quaternion renderRotation = Quaternion.identity;
+
+        // Gewichtung der einzelnen Marker zur Bestimmung der Position und Rotation
+        float weight = 1f / (float)trackedObjects.Count;
+
+        // Positions- und Rotationsreferenz anhand der gewichteten relativen Werte anpassen (Aufsummieren)
+        for (int i = 0; i < trackedObjects.Count; i++)
+        {
+            Vector3 pos = savedBuildings.GetRelativePosition(trackedObjects[i]);
+            Vector3 rot = savedBuildings.GetRelativeRotation(trackedObjects[i]);
+
+            renderPosition += (trackedObjects[i].transform.position + ((trackedObjects[i].transform.rotation * pos)));
+            renderRotation *= Quaternion.Slerp(Quaternion.identity, (trackedObjects[i].transform.rotation * Quaternion.Euler(rot)), weight);
+        }
+
+        // Mitteln der Position des 3D-Modells
+        renderPosition = renderPosition / trackedObjects.Count;
+
+        // Um ein Springen des 3D-Modells entgegenzuwirken, wird dessen Position und Rotation zwischen vorheriger und neuer Position interpoliert
+        building.transform.position = Vector3.Lerp(building.transform.position, renderPosition, Time.deltaTime * 5f);
+        building.transform.rotation = Quaternion.Lerp(building.transform.rotation, renderRotation, Time.deltaTime * 5f);
     }
 
 }
